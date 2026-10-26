@@ -73,7 +73,7 @@ class AutomationService : AccessibilityService() {
             showToast("📱 Запуск TikTok...")
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(launchIntent)
-            delay(3500) // Пауза на запуск TikTok (~1.4x)
+            delay(3500) // Пауза на запуск TikTok
 
             // 2. Переходимо у Вхідні (Inbox)
             ensureInboxScreen(contacts.first().name)
@@ -191,10 +191,10 @@ class AutomationService : AccessibilityService() {
 
         val root = rootInActiveWindow ?: return false
 
-        // Шукаємо контакт СТРОГО в межах списку чатів (між 28% і 88% висоти екрана)
+        // Шукаємо контакт СТРОГО в межах списку чатів і ПЕРЕВІРЯЄМО ТОЧНИЙ ЗБІГ імені
         val listNode = findNodeInYRange(root, name, minListY, maxListY)
         if (listNode != null) {
-            Log.d(TAG, "Found contact $name in chat list range")
+            Log.d(TAG, "Found exact contact $name in chat list range")
             clickNode(listNode)
             return true
         }
@@ -263,8 +263,14 @@ class AutomationService : AccessibilityService() {
         val rect = Rect()
         root.getBoundsInScreen(rect)
 
-        val matchesText = root.text?.toString()?.contains(text, ignoreCase = true) == true ||
-                root.contentDescription?.toString()?.contains(text, ignoreCase = true) == true
+        val nodeText = root.text?.toString()?.trim() ?: ""
+        val nodeDesc = root.contentDescription?.toString()?.trim() ?: ""
+
+        // Шукаємо ТОЧНИЙ збіг імені контакту (або початок рядка з цим ім'ям), а не місткість у межах тексту повідомлення!
+        val matchesText = nodeText.equals(text, ignoreCase = true) ||
+                nodeDesc.equals(text, ignoreCase = true) ||
+                nodeText.startsWith("$text ", ignoreCase = true) ||
+                nodeDesc.startsWith("$text ", ignoreCase = true)
 
         if (matchesText && rect.top >= minTopY && rect.bottom <= maxBottomY) {
             return root
