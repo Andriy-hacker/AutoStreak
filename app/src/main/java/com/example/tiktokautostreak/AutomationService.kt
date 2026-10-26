@@ -73,17 +73,17 @@ class AutomationService : AccessibilityService() {
             showToast("📱 Запуск TikTok...")
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(launchIntent)
-            delay(4000) // Час на запуск TikTok
+            delay(2000) // Прискорено: 2 сек на запуск TikTok
 
             // 2. Розумна навігація у Вхідні (Inbox)
             ensureInboxScreen(contacts.first().name)
-            delay(2000)
+            delay(1000)
 
             // 3. Проходимо циклом по контактах
             for (contact in contacts) {
                 showToast("👤 Обробка: ${contact.name}")
                 performStreakForContact(contact)
-                delay(2000) // Пауза між контактами
+                delay(800) // Пауза між контактами
             }
             showToast("✅ Автострік завершено!")
         }
@@ -101,16 +101,17 @@ class AutomationService : AccessibilityService() {
             if (isInsideChat) {
                 showToast("↩️ Виходимо з відкритого чату...")
                 performGlobalAction(GLOBAL_ACTION_BACK)
-                delay(1500)
+                delay(800)
             }
         }
 
         val displayMetrics = resources.displayMetrics
-        val minListY = (displayMetrics.heightPixels * 0.22).toInt()
+        val minListY = (displayMetrics.heightPixels * 0.28).toInt()
+        val maxListY = (displayMetrics.heightPixels * 0.88).toInt()
         val currentRoot = rootInActiveWindow
 
-        if (currentRoot != null && findNodeInBottomArea(currentRoot, firstContactName, minListY) != null) {
-            Log.d(TAG, "Contact $firstContactName is already visible in list")
+        if (currentRoot != null && findNodeInYRange(currentRoot, firstContactName, minListY, maxListY) != null) {
+            Log.d(TAG, "Contact $firstContactName is already visible in chat list")
             return
         }
 
@@ -121,7 +122,7 @@ class AutomationService : AccessibilityService() {
     private suspend fun performStreakForContact(contact: ContactConfig) {
         val name = contact.name
         if (openChatWithContact(name)) {
-            delay(2000)
+            delay(1000) // Прискорено: 1 сек на відкриття чату
 
             val root = rootInActiveWindow
             if (root == null) {
@@ -140,9 +141,9 @@ class AutomationService : AccessibilityService() {
 
                 if (clickedEmojiBar) {
                     showToast("😊 Надіслано емодзі ${contact.emojiSymbol}")
-                    delay(2000)
+                    delay(800)
                     performGlobalAction(GLOBAL_ACTION_BACK)
-                    delay(1000)
+                    delay(500)
                     return
                 }
             }
@@ -157,7 +158,7 @@ class AutomationService : AccessibilityService() {
                     textToSend
                 )
                 inputNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-                delay(1500)
+                delay(600)
 
                 // Натискаємо кнопку надсилання
                 val sent = clickOnText("Send") || clickOnText("Надіслати") || clickOnText("Отправить")
@@ -167,13 +168,13 @@ class AutomationService : AccessibilityService() {
                     clickAt(rect.right + 50f, rect.centerY().toFloat())
                 }
 
-                delay(1500)
+                delay(600)
                 performGlobalAction(GLOBAL_ACTION_BACK)
-                delay(1000)
+                delay(500)
             } else {
                 showToast("⚠️ Поле вводу не знайдено для $name")
                 performGlobalAction(GLOBAL_ACTION_BACK)
-                delay(1000)
+                delay(500)
             }
         } else {
             showToast("❌ Чат з $name не знайдено")
@@ -182,27 +183,29 @@ class AutomationService : AccessibilityService() {
 
     private suspend fun openChatWithContact(name: String): Boolean {
         val displayMetrics = resources.displayMetrics
-        val minListY = (displayMetrics.heightPixels * 0.22).toInt() // Пропускаємо смугу Сторіз вгорі!
+        val screenHeight = displayMetrics.heightPixels
+        val minListY = (screenHeight * 0.28).toInt() // Строго нижче смуги Сторіз (28%)
+        val maxListY = (screenHeight * 0.88).toInt() // Строго вище нижнього меню з "+" (88%)
 
         val root = rootInActiveWindow ?: return false
 
-        // 1. Спочатку шукаємо контакт безпосередньо у списку чатів (нижче смуги Сторіз)
-        val listNode = findNodeInBottomArea(root, name, minListY)
+        // 1. Пошук контакту строго в межах списку чатів
+        val listNode = findNodeInYRange(root, name, minListY, maxListY)
         if (listNode != null) {
-            Log.d(TAG, "Found contact $name in chat list below stories")
+            Log.d(TAG, "Found contact $name in chat list range")
             clickNode(listNode)
             return true
         }
 
-        // 2. Якщо контакту не видно у перших рядах — шукаємо через поіск TikTok Вхідних 🔍
+        // 2. Якщо контакту немає серед перших видимих — використовуємо Пошук 🔍 Вхідних
         val searchNode = findNodeByText(root, "Search")
             ?: findNodeByText(root, "Пошук")
             ?: findNodeByText(root, "Поиск")
 
         if (searchNode != null) {
-            Log.d(TAG, "Clicking search icon in Inbox")
+            Log.d(TAG, "Clicking search icon in Inbox for $name")
             clickNode(searchNode)
-            delay(1500)
+            delay(800)
 
             val searchRoot = rootInActiveWindow
             val searchInput = findNodeByText(searchRoot, "Search")
@@ -216,10 +219,10 @@ class AutomationService : AccessibilityService() {
                     name
                 )
                 searchInput.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-                delay(1500)
+                delay(800)
 
                 val resultRoot = rootInActiveWindow
-                val resultNode = findNodeInBottomArea(resultRoot, name, minListY)
+                val resultNode = findNodeInYRange(resultRoot, name, minListY, maxListY)
                 if (resultNode != null) {
                     clickNode(resultNode)
                     return true
@@ -227,8 +230,14 @@ class AutomationService : AccessibilityService() {
             }
         }
 
-        // 3. Запасний варіант
-        return clickOnText(name)
+        // 3. Запасний безпечний варіант (тільки в межах списку)
+        val fallbackNode = findNodeInYRange(rootInActiveWindow, name, minListY, maxListY)
+        if (fallbackNode != null) {
+            clickNode(fallbackNode)
+            return true
+        }
+
+        return false
     }
 
     private fun clickNode(node: AccessibilityNodeInfo) {
@@ -254,7 +263,7 @@ class AutomationService : AccessibilityService() {
         val root = rootInActiveWindow ?: return false
 
         // 1. Шукаємо емодзі СТРОГО в нижній частині екрана
-        val bottomEmojiNode = findNodeInBottomArea(root, emojiSymbol, minTopY)
+        val bottomEmojiNode = findNodeInYRange(root, emojiSymbol, minTopY, screenHeight)
         if (bottomEmojiNode != null) {
             clickNode(bottomEmojiNode)
             Log.d(TAG, "Found and clicked bottom emoji node for $emojiSymbol")
@@ -285,7 +294,7 @@ class AutomationService : AccessibilityService() {
         return false
     }
 
-    private fun findNodeInBottomArea(root: AccessibilityNodeInfo?, text: String, minTopY: Int): AccessibilityNodeInfo? {
+    private fun findNodeInYRange(root: AccessibilityNodeInfo?, text: String, minTopY: Int, maxBottomY: Int): AccessibilityNodeInfo? {
         if (root == null) return null
 
         val rect = Rect()
@@ -294,13 +303,13 @@ class AutomationService : AccessibilityService() {
         val matchesText = root.text?.toString()?.contains(text, ignoreCase = true) == true ||
                 root.contentDescription?.toString()?.contains(text, ignoreCase = true) == true
 
-        if (matchesText && rect.top >= minTopY) {
+        if (matchesText && rect.top >= minTopY && rect.bottom <= maxBottomY) {
             return root
         }
 
         for (i in 0 until root.childCount) {
             val child = root.getChild(i)
-            val result = findNodeInBottomArea(child, text, minTopY)
+            val result = findNodeInYRange(child, text, minTopY, maxBottomY)
             if (result != null) return result
         }
         return null
