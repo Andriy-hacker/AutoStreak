@@ -47,7 +47,12 @@ class AutomationService : AccessibilityService() {
             }
 
             // 1. Знаходимо та відкриваємо TikTok
-            val tikTokPackages = listOf("com.zhiliaoapp.musically", "com.ss.android.ugc.trill")
+            val tikTokPackages = listOf(
+                "com.zhiliaoapp.musically",
+                "com.ss.android.ugc.trill",
+                "com.zhiliaoapp.musically.go",
+                "com.ss.android.ugc.aweme"
+            )
             var launchIntent: Intent? = null
 
             for (pkg in tikTokPackages) {
@@ -175,7 +180,12 @@ class AutomationService : AccessibilityService() {
     }
 
     private fun showToast(message: String) {
-        Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
+        Log.d(TAG, "Toast: $message")
+        try {
+            Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to show toast", e)
+        }
     }
 
     companion object {
