@@ -73,17 +73,17 @@ class AutomationService : AccessibilityService() {
             showToast("📱 Запуск TikTok...")
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(launchIntent)
-            delay(2000) // Прискорено: 2 сек на запуск TikTok
+            delay(3500) // Стабільна пауза на запуск TikTok (~1.4x)
 
             // 2. Розумна навігація у Вхідні (Inbox)
             ensureInboxScreen(contacts.first().name)
-            delay(1000)
+            delay(1500)
 
             // 3. Проходимо циклом по контактах
             for (contact in contacts) {
                 showToast("👤 Обробка: ${contact.name}")
                 performStreakForContact(contact)
-                delay(800) // Пауза між контактами
+                delay(1500) // Надійна пауза між контактами
             }
             showToast("✅ Автострік завершено!")
         }
@@ -101,7 +101,7 @@ class AutomationService : AccessibilityService() {
             if (isInsideChat) {
                 showToast("↩️ Виходимо з відкритого чату...")
                 performGlobalAction(GLOBAL_ACTION_BACK)
-                delay(800)
+                delay(1200)
             }
         }
 
@@ -121,8 +121,10 @@ class AutomationService : AccessibilityService() {
 
     private suspend fun performStreakForContact(contact: ContactConfig) {
         val name = contact.name
-        if (openChatWithContact(name)) {
-            delay(1000) // Прискорено: 1 сек на відкриття чату
+        val chatOpened = openChatWithContact(name)
+        
+        if (chatOpened) {
+            delay(1500) // Надійний час на відкриття чату
 
             val root = rootInActiveWindow
             if (root == null) {
@@ -141,9 +143,9 @@ class AutomationService : AccessibilityService() {
 
                 if (clickedEmojiBar) {
                     showToast("😊 Надіслано емодзі ${contact.emojiSymbol}")
-                    delay(800)
+                    delay(1200)
                     performGlobalAction(GLOBAL_ACTION_BACK)
-                    delay(500)
+                    delay(1000)
                     return
                 }
             }
@@ -158,7 +160,7 @@ class AutomationService : AccessibilityService() {
                     textToSend
                 )
                 inputNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-                delay(600)
+                delay(1000)
 
                 // Натискаємо кнопку надсилання
                 val sent = clickOnText("Send") || clickOnText("Надіслати") || clickOnText("Отправить")
@@ -168,13 +170,13 @@ class AutomationService : AccessibilityService() {
                     clickAt(rect.right + 50f, rect.centerY().toFloat())
                 }
 
-                delay(600)
+                delay(1000)
                 performGlobalAction(GLOBAL_ACTION_BACK)
-                delay(500)
+                delay(1000)
             } else {
                 showToast("⚠️ Поле вводу не знайдено для $name")
                 performGlobalAction(GLOBAL_ACTION_BACK)
-                delay(500)
+                delay(1000)
             }
         } else {
             showToast("❌ Чат з $name не знайдено")
@@ -205,7 +207,7 @@ class AutomationService : AccessibilityService() {
         if (searchNode != null) {
             Log.d(TAG, "Clicking search icon in Inbox for $name")
             clickNode(searchNode)
-            delay(800)
+            delay(1200)
 
             val searchRoot = rootInActiveWindow
             val searchInput = findNodeByText(searchRoot, "Search")
@@ -219,7 +221,7 @@ class AutomationService : AccessibilityService() {
                     name
                 )
                 searchInput.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-                delay(800)
+                delay(1200)
 
                 val resultRoot = rootInActiveWindow
                 val resultNode = findNodeInYRange(resultRoot, name, minListY, maxListY)
@@ -228,13 +230,6 @@ class AutomationService : AccessibilityService() {
                     return true
                 }
             }
-        }
-
-        // 3. Запасний безпечний варіант (тільки в межах списку)
-        val fallbackNode = findNodeInYRange(rootInActiveWindow, name, minListY, maxListY)
-        if (fallbackNode != null) {
-            clickNode(fallbackNode)
-            return true
         }
 
         return false
