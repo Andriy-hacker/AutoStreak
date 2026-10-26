@@ -73,17 +73,17 @@ class AutomationService : AccessibilityService() {
             showToast("📱 Запуск TikTok...")
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(launchIntent)
-            delay(3500) // Стабільна пауза на запуск TikTok (~1.4x)
+            delay(3500) // Пауза на запуск TikTok (~1.4x)
 
-            // 2. Розумна навігація у Вхідні (Inbox)
+            // 2. Переходимо у Вхідні (Inbox)
             ensureInboxScreen(contacts.first().name)
             delay(1500)
 
-            // 3. Проходимо циклом по контактах
+            // 3. Проходимо циклом по контактах у списку
             for (contact in contacts) {
                 showToast("👤 Обробка: ${contact.name}")
                 performStreakForContact(contact)
-                delay(1500) // Надійна пауза між контактами
+                delay(1500) // Пауза між контактами
             }
             showToast("✅ Автострік завершено!")
         }
@@ -179,11 +179,11 @@ class AutomationService : AccessibilityService() {
                 delay(1000)
             }
         } else {
-            showToast("❌ Чат з $name не знайдено")
+            showToast("❌ Чат з $name не знайдено у списку")
         }
     }
 
-    private suspend fun openChatWithContact(name: String): Boolean {
+    private fun openChatWithContact(name: String): Boolean {
         val displayMetrics = resources.displayMetrics
         val screenHeight = displayMetrics.heightPixels
         val minListY = (screenHeight * 0.28).toInt() // Строго нижче смуги Сторіз (28%)
@@ -191,7 +191,7 @@ class AutomationService : AccessibilityService() {
 
         val root = rootInActiveWindow ?: return false
 
-        // 1. Пошук контакту строго в межах списку чатів
+        // Шукаємо контакт СТРОГО в межах списку чатів (між 28% і 88% висоти екрана)
         val listNode = findNodeInYRange(root, name, minListY, maxListY)
         if (listNode != null) {
             Log.d(TAG, "Found contact $name in chat list range")
@@ -199,39 +199,7 @@ class AutomationService : AccessibilityService() {
             return true
         }
 
-        // 2. Якщо контакту немає серед перших видимих — використовуємо Пошук 🔍 Вхідних
-        val searchNode = findNodeByText(root, "Search")
-            ?: findNodeByText(root, "Пошук")
-            ?: findNodeByText(root, "Поиск")
-
-        if (searchNode != null) {
-            Log.d(TAG, "Clicking search icon in Inbox for $name")
-            clickNode(searchNode)
-            delay(1200)
-
-            val searchRoot = rootInActiveWindow
-            val searchInput = findNodeByText(searchRoot, "Search")
-                ?: findNodeByText(searchRoot, "Пошук")
-                ?: findNodeByText(searchRoot, "Поиск")
-
-            if (searchInput != null) {
-                val arguments = Bundle()
-                arguments.putCharSequence(
-                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                    name
-                )
-                searchInput.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-                delay(1200)
-
-                val resultRoot = rootInActiveWindow
-                val resultNode = findNodeInYRange(resultRoot, name, minListY, maxListY)
-                if (resultNode != null) {
-                    clickNode(resultNode)
-                    return true
-                }
-            }
-        }
-
+        Log.d(TAG, "Contact $name NOT found in chat list range")
         return false
     }
 
