@@ -73,17 +73,17 @@ class AutomationService : AccessibilityService() {
             showToast("📱 Запуск TikTok...")
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(launchIntent)
-            delay(5000) // Пауза на повний запуск TikTok (ver 1.0)
+            delay(5000) // Пауза на повний запуск TikTok
 
             // 2. Переходимо у вкладку Inbox
             ensureInboxScreen()
-            delay(2500) // Пауза на завантаження списку (ver 1.0)
+            delay(2500) // Пауза на завантаження списку
 
             // 3. Проходимо циклом по контактах
             for (contact in contacts) {
                 showToast("👤 Обробка: ${contact.name}")
                 performStreakForContact(contact)
-                delay(2000) // Пауза між контактами (ver 1.0)
+                delay(2000) // Пауза між контактами
             }
             showToast("✅ Автострік завершено!")
         }
@@ -117,18 +117,25 @@ class AutomationService : AccessibilityService() {
         val chatOpened = openChatWithContact(name)
         
         if (chatOpened) {
-            delay(2000) // Пауза на відкриття чату (ver 1.0)
-
-            val root = rootInActiveWindow
-            if (root == null) {
-                showToast("⚠️ Не вдалося зчитати екран для $name")
-                return
+            // Чекаємо та опитуємо появу поля вводу в чаті (до 2 секунд)
+            var inputNode: AccessibilityNodeInfo? = null
+            repeat(4) {
+                delay(500)
+                val root = rootInActiveWindow
+                if (root != null) {
+                    inputNode = findNodeByText(root, "message") 
+                        ?: findNodeByText(root, "повідомлення")
+                        ?: findNodeByText(root, "сообщение")
+                        ?: findNodeByText(root, "напишіть")
+                    if (inputNode != null) return@repeat
+                }
             }
 
-            val inputNode = findNodeByText(root, "message") 
-                ?: findNodeByText(root, "повідомлення")
-                ?: findNodeByText(root, "сообщение")
-                ?: findNodeByText(root, "напишіть")
+            if (inputNode == null) {
+                showToast("⚠️ Поле вводу не з'явилося для $name")
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                return
+            }
 
             if (contact.messageType == MessageType.EMOJI) {
                 // Намагаємося натиснути на панель швидких емодзі ВНИЗУ екрану
@@ -145,29 +152,24 @@ class AutomationService : AccessibilityService() {
             // Якщо обрано текст або якщо емодзі-панель не спрацювала
             val textToSend = if (contact.messageType == MessageType.EMOJI) contact.emojiSymbol else contact.customText
 
-            if (inputNode != null) {
-                val arguments = Bundle()
-                arguments.putCharSequence(
-                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                    textToSend
-                )
-                inputNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-                delay(1500) // Пауза (ver 1.0)
-                
-                // Натискаємо кнопку надсилання
-                val sent = clickOnText("Send") || clickOnText("Надіслати") || clickOnText("Отправить")
-                if (!sent) {
-                    val rect = Rect()
-                    inputNode.getBoundsInScreen(rect)
-                    clickAt(rect.right + 50f, rect.centerY().toFloat())
-                }
-                
-                delay(1500) // Пауза (ver 1.0)
-                performGlobalAction(GLOBAL_ACTION_BACK)
-            } else {
-                showToast("⚠️ Поле вводу не знайдено для $name")
-                performGlobalAction(GLOBAL_ACTION_BACK)
+            val arguments = Bundle()
+            arguments.putCharSequence(
+                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                textToSend
+            )
+            inputNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+            delay(1500)
+
+            // Натискаємо кнопку надсилання
+            val sent = clickOnText("Send") || clickOnText("Надіслати") || clickOnText("Отправить")
+            if (!sent) {
+                val rect = Rect()
+                inputNode.getBoundsInScreen(rect)
+                clickAt(rect.right + 50f, rect.centerY().toFloat())
             }
+
+            delay(1500)
+            performGlobalAction(GLOBAL_ACTION_BACK)
         } else {
             showToast("❌ Чат з $name не знайдено у списку")
         }
@@ -176,18 +178,25 @@ class AutomationService : AccessibilityService() {
     private fun openChatWithContact(name: String): Boolean {
         val displayMetrics = resources.displayMetrics
         val screenHeight = displayMetrics.heightPixels
+        val screenWidth = displayMetrics.widthPixels
         val minListY = (screenHeight * 0.28).toInt() // Нижче смуги Сторіз (28%)
         val maxListY = (screenHeight * 0.88).toInt() // Вище нижнього меню з "+" (88%)
 
         val root = rootInActiveWindow ?: return false
 
-        // Шукаємо контакт СТРОГО в межах списку чатів і клікаємо ТОЧНО по координатах тексту імені
+        // Шукаємо контакт СТРОГО в межах списку чатів
         val node = findExactContactNode(root, name, minListY, maxListY)
         if (node != null) {
             val rect = Rect()
             node.getBoundsInScreen(rect)
-            Log.d(TAG, "Clicking exact contact $name at coordinates (${rect.centerX()}, ${rect.centerY()})")
-            clickAt(rect.centerX().toFloat(), rect.centerY().toFloat())
+            
+            // ЗСУВАЄМО КЛІК ВПРАВО (на 140 пікселів вправо від центру тексту), 
+            // щоб гарантовано натиснути на область імені/чату, а НЕ на аватарку зліва (яка відкриває Сторіз)!
+            val targetX = (rect.centerX() + 140f).coerceAtMost(screenWidth * 0.75f)
+            val targetY = rect.centerY().toFloat()
+
+            Log.d(TAG, "Clicking chat row for $name safely away from avatar at coordinates ($targetX, $targetY)")
+            clickAt(targetX, targetY)
             return true
         }
 
