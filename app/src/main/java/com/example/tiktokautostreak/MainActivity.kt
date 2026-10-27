@@ -215,7 +215,7 @@ fun ContactCard(
                     value = contact.name,
                     onValueChange = { onUpdate(contact.copy(name = it)) },
                     label = { Text("Нікнейм в TikTok") },
-                    placeholder = { Text("Shpak") },
+                    placeholder = { Text("Name") },
                     modifier = Modifier.weight(1f),
                     singleLine = true
                 )

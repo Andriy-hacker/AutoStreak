@@ -73,9 +73,9 @@ class AutomationService : AccessibilityService() {
             showToast("📱 Запуск TikTok...")
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(launchIntent)
-            delay(5000) // Надійна пауза на запуск (ver 1.0)
+            delay(5000) // Пауза на повний запуск TikTok (ver 1.0)
 
-            // 2. Повернення у Вхідні (Inbox) з перевіркою активного чату
+            // 2. Переходимо у вкладку Inbox
             ensureInboxScreen()
             delay(2500) // Пауза на завантаження списку (ver 1.0)
 
@@ -92,7 +92,6 @@ class AutomationService : AccessibilityService() {
     private suspend fun ensureInboxScreen() {
         val root = rootInActiveWindow
         if (root != null) {
-            // Перевіряємо, чи ми застрягли всередині відкритого чату
             val isInsideChat = findNodeByText(root, "message") != null 
                     || findNodeByText(root, "повідомлення") != null
                     || findNodeByText(root, "сообщение") != null
@@ -108,7 +107,6 @@ class AutomationService : AccessibilityService() {
         showToast("💬 Шукаємо вкладку Inbox...")
         val openedInbox = clickOnText("Inbox") || clickOnText("Вхідні") || clickOnText("Входящие")
         if (!openedInbox) {
-            // Резервний клік на нижню панель у правому кутку (де зазвичай Inbox)
             val displayMetrics = resources.displayMetrics
             clickAt(displayMetrics.widthPixels * 0.7f, displayMetrics.heightPixels * 0.95f)
         }
@@ -116,22 +114,24 @@ class AutomationService : AccessibilityService() {
 
     private suspend fun performStreakForContact(contact: ContactConfig) {
         val name = contact.name
-        if (clickOnText(name)) {
+        val chatOpened = openChatWithContact(name)
+        
+        if (chatOpened) {
             delay(2000) // Пауза на відкриття чату (ver 1.0)
-            
+
             val root = rootInActiveWindow
             if (root == null) {
                 showToast("⚠️ Не вдалося зчитати екран для $name")
                 return
             }
-            
+
             val inputNode = findNodeByText(root, "message") 
                 ?: findNodeByText(root, "повідомлення")
                 ?: findNodeByText(root, "сообщение")
                 ?: findNodeByText(root, "напишіть")
 
             if (contact.messageType == MessageType.EMOJI) {
-                // Натискаємо на точні координати емодзі на панелі TikTok над полем вводу
+                // Намагаємося натиснути на панель швидких емодзі ВНИЗУ екрану
                 val clickedEmojiBar = clickQuickEmojiBar(contact.emojiSymbol, inputNode)
 
                 if (clickedEmojiBar) {
@@ -173,6 +173,28 @@ class AutomationService : AccessibilityService() {
         }
     }
 
+    private fun openChatWithContact(name: String): Boolean {
+        val displayMetrics = resources.displayMetrics
+        val screenHeight = displayMetrics.heightPixels
+        val minListY = (screenHeight * 0.28).toInt() // Нижче смуги Сторіз (28%)
+        val maxListY = (screenHeight * 0.88).toInt() // Вище нижнього меню з "+" (88%)
+
+        val root = rootInActiveWindow ?: return false
+
+        // Шукаємо контакт СТРОГО в межах списку чатів і клікаємо ТОЧНО по координатах тексту імені
+        val node = findExactContactNode(root, name, minListY, maxListY)
+        if (node != null) {
+            val rect = Rect()
+            node.getBoundsInScreen(rect)
+            Log.d(TAG, "Clicking exact contact $name at coordinates (${rect.centerX()}, ${rect.centerY()})")
+            clickAt(rect.centerX().toFloat(), rect.centerY().toFloat())
+            return true
+        }
+
+        Log.d(TAG, "Contact $name NOT found in chat list range")
+        return false
+    }
+
     private fun clickQuickEmojiBar(emojiSymbol: String, inputNode: AccessibilityNodeInfo?): Boolean {
         if (inputNode != null) {
             val displayMetrics = resources.displayMetrics
@@ -181,15 +203,11 @@ class AutomationService : AccessibilityService() {
             val inputRect = Rect()
             inputNode.getBoundsInScreen(inputRect)
 
-            // Панель швидких емодзі в TikTok завжди розташована приблизно на 55 пікселів вище поля вводу
             val emojiBarY = (inputRect.top - 55).toFloat()
-
-            // Порядок емодзі на панелі TikTok зліва направо:
             val emojis = listOf("❤️", "😂", "👍", "😴", "👈", "👋", "🌹", "🔥")
             val index = emojis.indexOf(emojiSymbol)
             val targetIndex = if (index >= 0) index else 0
 
-            // Розрахунок X-координати по ширині екрана (від 8% до 92%)
             val spacing = screenWidth / 8.0f
             val targetX = spacing * (targetIndex + 0.5f)
 
@@ -200,23 +218,39 @@ class AutomationService : AccessibilityService() {
         return false
     }
 
+    private fun findExactContactNode(root: AccessibilityNodeInfo?, text: String, minTopY: Int, maxBottomY: Int): AccessibilityNodeInfo? {
+        if (root == null) return null
+
+        val rect = Rect()
+        root.getBoundsInScreen(rect)
+
+        val nodeText = root.text?.toString()?.trim() ?: ""
+        val nodeDesc = root.contentDescription?.toString()?.trim() ?: ""
+
+        // Шукаємо точний збіг імені контакту всередині діапазону списку
+        if ((nodeText.equals(text, ignoreCase = true) || 
+             nodeDesc.equals(text, ignoreCase = true) ||
+             nodeText.startsWith("$text ", ignoreCase = true) ||
+             nodeDesc.startsWith("$text ", ignoreCase = true)) && 
+            rect.top >= minTopY && rect.bottom <= maxBottomY) {
+            return root
+        }
+
+        for (i in 0 until root.childCount) {
+            val child = root.getChild(i)
+            val result = findExactContactNode(child, text, minTopY, maxBottomY)
+            if (result != null) return result
+        }
+        return null
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
     override fun onInterrupt() {}
 
     private fun findNodeByText(root: AccessibilityNodeInfo?, text: String): AccessibilityNodeInfo? {
         if (root == null) return null
-        
-        val nodeText = root.text?.toString()?.trim() ?: ""
-        val nodeDesc = root.contentDescription?.toString()?.trim() ?: ""
-
-        // Шукаємо точний збіг або початок рядка з ім'ям контакту
-        if (nodeText.equals(text, ignoreCase = true) || 
-            nodeDesc.equals(text, ignoreCase = true) ||
-            nodeText.startsWith("$text ", ignoreCase = true) ||
-            nodeDesc.startsWith("$text ", ignoreCase = true) ||
-            nodeText.contains(text, ignoreCase = true)) {
-            return root
-        }
+        if (root.text?.toString()?.contains(text, ignoreCase = true) == true) return root
+        if (root.contentDescription?.toString()?.contains(text, ignoreCase = true) == true) return root
         
         for (i in 0 until root.childCount) {
             val child = root.getChild(i)
@@ -226,26 +260,21 @@ class AutomationService : AccessibilityService() {
         return null
     }
 
-    private fun clickNode(node: AccessibilityNodeInfo) {
-        var clickableNode: AccessibilityNodeInfo? = node
-        while (clickableNode != null && !clickableNode.isClickable) {
-            clickableNode = clickableNode.parent
-        }
-        
-        if (clickableNode != null && clickableNode.isClickable) {
-            clickableNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        } else {
-            val rect = Rect()
-            node.getBoundsInScreen(rect)
-            clickAt(rect.centerX().toFloat(), rect.centerY().toFloat())
-        }
-    }
-
     private fun clickOnText(text: String): Boolean {
         val root = rootInActiveWindow ?: return false
         val node = findNodeByText(root, text)
         if (node != null) {
-            clickNode(node)
+            var clickableNode = node
+            while (clickableNode != null && !clickableNode.isClickable) {
+                clickableNode = clickableNode.parent
+            }
+            if (clickableNode != null && clickableNode.isClickable) {
+                clickableNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            } else {
+                val rect = Rect()
+                node.getBoundsInScreen(rect)
+                clickAt(rect.centerX().toFloat(), rect.centerY().toFloat())
+            }
             return true
         }
         return false
