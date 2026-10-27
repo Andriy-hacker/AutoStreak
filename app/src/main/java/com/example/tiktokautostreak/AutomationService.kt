@@ -73,31 +73,51 @@ class AutomationService : AccessibilityService() {
             showToast("📱 Запуск TikTok...")
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(launchIntent)
-            delay(5000) // Повна оригінальна пауза ver 1.0 (5 сек)
+            delay(5000) // Надійна пауза на запуск (ver 1.0)
 
-            // 2. Переходимо у вкладку Inbox (як у ver 1.0)
-            showToast("💬 Шукаємо вкладку Inbox...")
-            val openedInbox = clickOnText("Inbox") || clickOnText("Вхідні") || clickOnText("Входящие")
-            if (openedInbox) {
-                delay(2500) // Оригінальна пауза на завантаження списку
-                
-                // 3. Проходимо циклом по контактах
-                for (contact in contacts) {
-                    showToast("👤 Обробка: ${contact.name}")
-                    performStreakForContact(contact)
-                    delay(2000) // Оригінальна пауза між контактами (2 сек)
-                }
-                showToast("✅ Автострік завершено!")
-            } else {
-                showToast("⚠️ Не вдалося відкрити вкладку Inbox/Вхідні")
+            // 2. Повернення у Вхідні (Inbox) з перевіркою активного чату
+            ensureInboxScreen()
+            delay(2500) // Пауза на завантаження списку (ver 1.0)
+
+            // 3. Проходимо циклом по контактах
+            for (contact in contacts) {
+                showToast("👤 Обробка: ${contact.name}")
+                performStreakForContact(contact)
+                delay(2000) // Пауза між контактами (ver 1.0)
             }
+            showToast("✅ Автострік завершено!")
+        }
+    }
+
+    private suspend fun ensureInboxScreen() {
+        val root = rootInActiveWindow
+        if (root != null) {
+            // Перевіряємо, чи ми застрягли всередині відкритого чату
+            val isInsideChat = findNodeByText(root, "message") != null 
+                    || findNodeByText(root, "повідомлення") != null
+                    || findNodeByText(root, "сообщение") != null
+                    || findNodeByText(root, "Відповісти") != null
+
+            if (isInsideChat) {
+                showToast("↩️ Виходимо з відкритого чату...")
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                delay(1500)
+            }
+        }
+
+        showToast("💬 Шукаємо вкладку Inbox...")
+        val openedInbox = clickOnText("Inbox") || clickOnText("Вхідні") || clickOnText("Входящие")
+        if (!openedInbox) {
+            // Резервний клік на нижню панель у правому кутку (де зазвичай Inbox)
+            val displayMetrics = resources.displayMetrics
+            clickAt(displayMetrics.widthPixels * 0.7f, displayMetrics.heightPixels * 0.95f)
         }
     }
 
     private suspend fun performStreakForContact(contact: ContactConfig) {
         val name = contact.name
         if (clickOnText(name)) {
-            delay(2000) // Оригінальна пауза на відкриття чату (2 сек)
+            delay(2000) // Пауза на відкриття чату (ver 1.0)
             
             val root = rootInActiveWindow
             if (root == null) {
@@ -111,7 +131,9 @@ class AutomationService : AccessibilityService() {
                 ?: findNodeByText(root, "напишіть")
 
             if (contact.messageType == MessageType.EMOJI) {
+                // Натискаємо на точні координати емодзі на панелі TikTok над полем вводу
                 val clickedEmojiBar = clickQuickEmojiBar(contact.emojiSymbol, inputNode)
+
                 if (clickedEmojiBar) {
                     showToast("😊 Надіслано емодзі ${contact.emojiSymbol}")
                     delay(1500)
@@ -120,6 +142,7 @@ class AutomationService : AccessibilityService() {
                 }
             }
 
+            // Якщо обрано текст або якщо емодзі-панель не спрацювала
             val textToSend = if (contact.messageType == MessageType.EMOJI) contact.emojiSymbol else contact.customText
 
             if (inputNode != null) {
@@ -129,7 +152,7 @@ class AutomationService : AccessibilityService() {
                     textToSend
                 )
                 inputNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-                delay(1500) // Оригінальна пауза (1.5 сек)
+                delay(1500) // Пауза (ver 1.0)
                 
                 // Натискаємо кнопку надсилання
                 val sent = clickOnText("Send") || clickOnText("Надіслати") || clickOnText("Отправить")
@@ -139,7 +162,7 @@ class AutomationService : AccessibilityService() {
                     clickAt(rect.right + 50f, rect.centerY().toFloat())
                 }
                 
-                delay(1500) // Оригінальна пауза (1.5 сек)
+                delay(1500) // Пауза (ver 1.0)
                 performGlobalAction(GLOBAL_ACTION_BACK)
             } else {
                 showToast("⚠️ Поле вводу не знайдено для $name")
@@ -151,55 +174,30 @@ class AutomationService : AccessibilityService() {
     }
 
     private fun clickQuickEmojiBar(emojiSymbol: String, inputNode: AccessibilityNodeInfo?): Boolean {
-        val displayMetrics = resources.displayMetrics
-        val screenHeight = displayMetrics.heightPixels
-        val screenWidth = displayMetrics.widthPixels
-        val minTopY = (screenHeight * 0.60).toInt()
-
-        val root = rootInActiveWindow ?: return false
-        val bottomEmojiNode = findNodeInYRange(root, emojiSymbol, minTopY, screenHeight)
-        if (bottomEmojiNode != null) {
-            clickNode(bottomEmojiNode)
-            return true
-        }
-
         if (inputNode != null) {
+            val displayMetrics = resources.displayMetrics
+            val screenWidth = displayMetrics.widthPixels
+
             val inputRect = Rect()
             inputNode.getBoundsInScreen(inputRect)
-            val emojiBarY = (inputRect.top - 60).toFloat()
+
+            // Панель швидких емодзі в TikTok завжди розташована приблизно на 55 пікселів вище поля вводу
+            val emojiBarY = (inputRect.top - 55).toFloat()
+
+            // Порядок емодзі на панелі TikTok зліва направо:
             val emojis = listOf("❤️", "😂", "👍", "😴", "👈", "👋", "🌹", "🔥")
             val index = emojis.indexOf(emojiSymbol)
-            if (index >= 0 && emojiBarY > 0) {
-                val totalEmojis = 7.0f
-                val startX = 70f
-                val endX = screenWidth - 70f
-                val step = (endX - startX) / totalEmojis
-                val targetX = startX + (index * step)
-                clickAt(targetX, emojiBarY)
-                return true
-            }
+            val targetIndex = if (index >= 0) index else 0
+
+            // Розрахунок X-координати по ширині екрана (від 8% до 92%)
+            val spacing = screenWidth / 8.0f
+            val targetX = spacing * (targetIndex + 0.5f)
+
+            Log.d(TAG, "Tapping quick emoji $emojiSymbol (index $targetIndex) at coordinates ($targetX, $emojiBarY)")
+            clickAt(targetX, emojiBarY)
+            return true
         }
         return false
-    }
-
-    private fun findNodeInYRange(root: AccessibilityNodeInfo?, text: String, minTopY: Int, maxBottomY: Int): AccessibilityNodeInfo? {
-        if (root == null) return null
-        val rect = Rect()
-        root.getBoundsInScreen(rect)
-        val nodeText = root.text?.toString()?.trim() ?: ""
-        val nodeDesc = root.contentDescription?.toString()?.trim() ?: ""
-
-        if ((nodeText.contains(text, ignoreCase = true) || nodeDesc.contains(text, ignoreCase = true)) 
-            && rect.top >= minTopY && rect.bottom <= maxBottomY) {
-            return root
-        }
-
-        for (i in 0 until root.childCount) {
-            val child = root.getChild(i)
-            val result = findNodeInYRange(child, text, minTopY, maxBottomY)
-            if (result != null) return result
-        }
-        return null
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
@@ -207,8 +205,18 @@ class AutomationService : AccessibilityService() {
 
     private fun findNodeByText(root: AccessibilityNodeInfo?, text: String): AccessibilityNodeInfo? {
         if (root == null) return null
-        if (root.text?.toString()?.contains(text, ignoreCase = true) == true) return root
-        if (root.contentDescription?.toString()?.contains(text, ignoreCase = true) == true) return root
+        
+        val nodeText = root.text?.toString()?.trim() ?: ""
+        val nodeDesc = root.contentDescription?.toString()?.trim() ?: ""
+
+        // Шукаємо точний збіг або початок рядка з ім'ям контакту
+        if (nodeText.equals(text, ignoreCase = true) || 
+            nodeDesc.equals(text, ignoreCase = true) ||
+            nodeText.startsWith("$text ", ignoreCase = true) ||
+            nodeDesc.startsWith("$text ", ignoreCase = true) ||
+            nodeText.contains(text, ignoreCase = true)) {
+            return root
+        }
         
         for (i in 0 until root.childCount) {
             val child = root.getChild(i)
