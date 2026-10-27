@@ -73,9 +73,9 @@ class AutomationService : AccessibilityService() {
             showToast("📱 Запуск TikTok...")
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(launchIntent)
-            delay(5000) // Пауза на повний запуск TikTok
+            delay(5000) // Пауза на запуск TikTok
 
-            // 2. Переходимо у вкладку Inbox
+            // 2. Переходимо у Вхідні (Inbox)
             ensureInboxScreen()
             delay(2500) // Пауза на завантаження списку
 
@@ -117,9 +117,9 @@ class AutomationService : AccessibilityService() {
         val chatOpened = openChatWithContact(name)
         
         if (chatOpened) {
-            // Чекаємо та опитуємо появу поля вводу в чаті (до 2 секунд)
+            // Чекаємо та опитуємо появу поля вводу в чаті (до 2.5 секунд)
             var inputNode: AccessibilityNodeInfo? = null
-            repeat(4) {
+            repeat(5) {
                 delay(500)
                 val root = rootInActiveWindow
                 if (root != null) {
@@ -132,13 +132,12 @@ class AutomationService : AccessibilityService() {
             }
 
             if (inputNode == null) {
-                showToast("⚠️ Поле вводу не з'явилося для $name")
+                showToast("❌ Не вдалося відкрити чат з $name (не знайшли поле вводу)")
                 performGlobalAction(GLOBAL_ACTION_BACK)
                 return
             }
 
             if (contact.messageType == MessageType.EMOJI) {
-                // Намагаємося натиснути на панель швидких емодзі ВНИЗУ екрану
                 val clickedEmojiBar = clickQuickEmojiBar(contact.emojiSymbol, inputNode)
 
                 if (clickedEmojiBar) {
@@ -149,7 +148,7 @@ class AutomationService : AccessibilityService() {
                 }
             }
 
-            // Якщо обрано текст або якщо емодзі-панель не спрацювала
+            // Якщо обрано текст або емодзі-панель не спрацювала
             val textToSend = if (contact.messageType == MessageType.EMOJI) contact.emojiSymbol else contact.customText
 
             val arguments = Bundle()
@@ -178,24 +177,22 @@ class AutomationService : AccessibilityService() {
     private fun openChatWithContact(name: String): Boolean {
         val displayMetrics = resources.displayMetrics
         val screenHeight = displayMetrics.heightPixels
-        val screenWidth = displayMetrics.widthPixels
         val minListY = (screenHeight * 0.28).toInt() // Нижче смуги Сторіз (28%)
         val maxListY = (screenHeight * 0.88).toInt() // Вище нижнього меню з "+" (88%)
 
         val root = rootInActiveWindow ?: return false
 
-        // Шукаємо контакт СТРОГО в межах списку чатів
+        // Шукаємо контакт за точним словом/початком імені (межі слів \b)
         val node = findExactContactNode(root, name, minListY, maxListY)
         if (node != null) {
             val rect = Rect()
             node.getBoundsInScreen(rect)
             
-            // ЗСУВАЄМО КЛІК ВПРАВО (на 140 пікселів вправо від центру тексту), 
-            // щоб гарантовано натиснути на область імені/чату, а НЕ на аватарку зліва (яка відкриває Сторіз)!
-            val targetX = (rect.centerX() + 140f).coerceAtMost(screenWidth * 0.75f)
+            // Зсуваємо вправо від аватарки (щоб не відкрити Сторіз)
+            val targetX = (rect.centerX() + 140f).coerceAtMost(displayMetrics.widthPixels * 0.75f)
             val targetY = rect.centerY().toFloat()
 
-            Log.d(TAG, "Clicking chat row for $name safely away from avatar at coordinates ($targetX, $targetY)")
+            Log.d(TAG, "Clicking exact chat row for $name at coordinates ($targetX, $targetY)")
             clickAt(targetX, targetY)
             return true
         }
@@ -236,12 +233,12 @@ class AutomationService : AccessibilityService() {
         val nodeText = root.text?.toString()?.trim() ?: ""
         val nodeDesc = root.contentDescription?.toString()?.trim() ?: ""
 
-        // Шукаємо точний збіг імені контакту всередині діапазону списку
-        if ((nodeText.equals(text, ignoreCase = true) || 
-             nodeDesc.equals(text, ignoreCase = true) ||
-             nodeText.startsWith("$text ", ignoreCase = true) ||
-             nodeDesc.startsWith("$text ", ignoreCase = true)) && 
-            rect.top >= minTopY && rect.bottom <= maxBottomY) {
+        // Використовуємо межі слів (\b), щоб не чіпати чужі повідомлення, де випадково є підрядок
+        val regex = Regex("\\b${Regex.escape(text)}\\b", RegexOption.IGNORE_CASE)
+        val matchesText = regex.containsMatchIn(nodeText) || regex.containsMatchIn(nodeDesc) ||
+                nodeText.equals(text, ignoreCase = true) || nodeDesc.equals(text, ignoreCase = true)
+
+        if (matchesText && rect.top >= minTopY && rect.bottom <= maxBottomY) {
             return root
         }
 
